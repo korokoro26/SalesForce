@@ -1,0 +1,907 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>SalesForce - 近隣法人営業支援</title>
+  
+  <!-- Leaflet.js (地図) -->
+  <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
+  <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+
+  <!-- Driver.js (プロダクトツアー) -->
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/driver.js@1.3.1/dist/driver.css"/>
+  <script src="https://cdn.jsdelivr.net/npm/driver.js@1.3.1/dist/driver.js.iife.js"></script>
+  
+  <style>
+    :root {
+      --primary: #2563eb;
+      --primary-hover: #1d4ed8;
+      --bg: #f8fafc;
+      --panel-bg: #ffffff;
+      --border: #e2e8f0;
+      --text: #0f172a;
+      --text-muted: #64748b;
+      --highlight: #f97316;
+    }
+    * { box-sizing: border-box; margin: 0; padding: 0; font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; }
+    body { background-color: var(--bg); color: var(--text); height: 100vh; display: flex; flex-direction: column; overflow: hidden; }
+
+    header {
+      background: var(--panel-bg);
+      border-bottom: 1px solid var(--border);
+      padding: 0.5rem 1rem;
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      flex-shrink: 0;
+    }
+    .brand { font-size: 1rem; font-weight: 700; color: var(--primary); }
+    .header-right { display: flex; align-items: center; gap: 0.75rem; }
+    .attribution { font-size: 0.7rem; color: var(--text-muted); }
+    .attribution a { color: var(--primary); text-decoration: none; }
+    
+    .btn-tour-start {
+      background: #eff6ff;
+      color: var(--primary);
+      border: 1px solid #bfdbfe;
+      padding: 0.25rem 0.6rem;
+      border-radius: 4px;
+      font-size: 0.75rem;
+      cursor: pointer;
+      display: inline-flex;
+      align-items: center;
+      gap: 0.25rem;
+      font-weight: 600;
+      transition: all 0.15s;
+    }
+    .btn-tour-start:hover {
+      background: #dbeafe;
+    }
+
+    .main-container {
+      display: flex;
+      flex: 1;
+      height: calc(100vh - 42px);
+      overflow: hidden;
+    }
+
+    /* 左パネル */
+    .left-panel {
+      width: 380px;
+      background: var(--panel-bg);
+      border-right: 1px solid var(--border);
+      display: flex;
+      flex-direction: column;
+      flex-shrink: 0;
+    }
+    .search-box {
+      padding: 0.75rem;
+      border-bottom: 1px solid var(--border);
+      background: #fff;
+      display: flex;
+      flex-direction: column;
+      gap: 0.5rem;
+    }
+    .input-group { position: relative; }
+    input[type="text"] {
+      width: 100%;
+      padding: 0.5rem 0.65rem;
+      border: 1px solid var(--border);
+      border-radius: 6px;
+      font-size: 0.85rem;
+      outline: none;
+    }
+    input[type="text"]:focus { border-color: var(--primary); }
+    .autocomplete-list {
+      position: absolute;
+      top: 100%;
+      left: 0;
+      right: 0;
+      background: #fff;
+      border: 1px solid var(--border);
+      border-radius: 0 0 6px 6px;
+      max-height: 200px;
+      overflow-y: auto;
+      z-index: 1000;
+      display: none;
+      box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.1);
+    }
+    .autocomplete-item {
+      padding: 0.4rem 0.65rem;
+      cursor: pointer;
+      font-size: 0.8rem;
+      border-bottom: 1px solid #f1f5f9;
+    }
+    .autocomplete-item:hover { background: #f8fafc; }
+    .controls-row { display: flex; gap: 0.4rem; }
+    button {
+      background: var(--primary);
+      color: #fff;
+      border: none;
+      padding: 0.45rem 0.8rem;
+      border-radius: 6px;
+      cursor: pointer;
+      font-size: 0.8rem;
+      font-weight: 500;
+      transition: background 0.15s;
+    }
+    button:hover { background: var(--primary-hover); }
+    button.secondary { background: #e2e8f0; color: #334155; }
+    button.secondary:hover { background: #cbd5e1; }
+
+    .result-list {
+      flex: 1;
+      overflow-y: auto;
+      padding: 0.6rem;
+      display: flex;
+      flex-direction: column;
+      gap: 0.5rem;
+    }
+
+    /* 各法人カード */
+    .card {
+      border: 1px solid var(--border);
+      border-radius: 6px;
+      padding: 0.6rem 0.7rem;
+      background: #fff;
+      cursor: pointer;
+      transition: border-color 0.15s, box-shadow 0.15s;
+    }
+    .card:hover { border-color: #cbd5e1; }
+    .card.selected {
+      border-color: var(--highlight);
+      background-color: #fffaf5;
+      box-shadow: 0 0 0 1px var(--highlight);
+    }
+    .card-top {
+      display: flex;
+      justify-content: space-between;
+      align-items: baseline;
+      gap: 0.5rem;
+      margin-bottom: 0.2rem;
+    }
+    .card-title {
+      font-weight: 600;
+      font-size: 0.88rem;
+      color: var(--text);
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
+    .card-category {
+      font-size: 0.68rem;
+      padding: 0.1rem 0.35rem;
+      border-radius: 4px;
+      background: #eff6ff;
+      color: #1d4ed8;
+      flex-shrink: 0;
+    }
+    .card-address {
+      font-size: 0.75rem;
+      color: var(--text-muted);
+      margin-bottom: 0.45rem;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
+    .card-bottom {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      gap: 0.4rem;
+    }
+    .quick-links { display: flex; gap: 0.35rem; }
+    .link-chip {
+      display: inline-flex;
+      align-items: center;
+      font-size: 0.7rem;
+      padding: 0.15rem 0.45rem;
+      border-radius: 4px;
+      text-decoration: none;
+      border: 1px solid var(--border);
+      color: #475569;
+      background: #f8fafc;
+    }
+    .link-chip:hover { background: #e2e8f0; color: #0f172a; }
+    .btn-action {
+      padding: 0.25rem 0.55rem;
+      font-size: 0.72rem;
+      border-radius: 4px;
+    }
+
+    /* 中央マップ */
+    #map { flex: 1; height: 100%; z-index: 10; }
+
+    /* 右パネル */
+    .right-panel {
+      width: 360px;
+      background: var(--panel-bg);
+      border-left: 1px solid var(--border);
+      display: flex;
+      flex-direction: column;
+      flex-shrink: 0;
+    }
+    .list-header {
+      padding: 0.65rem 0.85rem;
+      border-bottom: 1px solid var(--border);
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+    }
+    .customer-list {
+      flex: 1;
+      overflow-y: auto;
+      padding: 0.6rem;
+      display: flex;
+      flex-direction: column;
+      gap: 0.5rem;
+    }
+    .saved-card {
+      border: 1px solid var(--border);
+      border-left: 3px solid var(--primary);
+      border-radius: 5px;
+      padding: 0.5rem 0.65rem;
+      background: #fff;
+      display: flex;
+      flex-direction: column;
+      gap: 0.3rem;
+      cursor: pointer;
+      transition: border-color 0.15s, box-shadow 0.15s;
+    }
+    .saved-card.selected {
+      border-color: var(--highlight);
+      border-left: 3px solid var(--highlight);
+      background-color: #fffaf5;
+      box-shadow: 0 0 0 1px var(--highlight);
+    }
+    .editable-row { display: flex; gap: 0.3rem; }
+    .editable-input {
+      font-size: 0.72rem;
+      padding: 0.25rem 0.4rem;
+      border: 1px solid var(--border);
+      border-radius: 4px;
+      width: 100%;
+    }
+    .status-select {
+      font-size: 0.72rem;
+      padding: 0.2rem 0.35rem;
+      border-radius: 4px;
+      border: 1px solid var(--border);
+      background: #fff;
+    }
+
+    /* Driver.js ポップオーバーの微調整 */
+    .driver-popover {
+      max-width: 320px !important;
+      font-size: 0.85rem !important;
+    }
+    .driver-popover-title {
+      font-size: 0.95rem !important;
+      font-weight: 700 !important;
+      color: #0f172a !important;
+    }
+  </style>
+</head>
+<body>
+
+  <header>
+    <div class="brand">🏢 SalesForce</div>
+    <div class="header-right">
+      <button id="startTourBtn" class="btn-tour-start">❓ 使い方ガイド</button>
+      <div class="attribution">
+        出典: <a href="https://openpoiapi.com/attribution.html" target="_blank" rel="noopener">OpenPOI API</a>
+      </div>
+    </div>
+  </header>
+
+  <div class="main-container">
+    <div class="left-panel">
+      <div class="search-box" id="tour-step-search">
+        <div class="input-group">
+          <input type="text" id="searchInput" placeholder="地名・駅名・施設名（例: 飯田駅、渋谷区）" autocomplete="off">
+          <div id="autocompleteList" class="autocomplete-list"></div>
+        </div>
+        <div class="controls-row">
+          <button id="searchBtn" style="flex:1;">周辺法人を検索</button>
+          <button id="nearbyBtn" class="secondary" title="現在地周辺を検索" id="tour-step-nearby">📍 現在地周辺</button>
+        </div>
+      </div>
+      <div id="resultCount" style="padding: 0.4rem 0.75rem; font-size: 0.75rem; color: var(--text-muted); border-bottom: 1px solid var(--border);">
+        結果: 0 件
+      </div>
+      <div class="result-list" id="resultList">
+        <div style="text-align: center; color: var(--text-muted); margin-top: 2rem; font-size: 0.8rem;">
+          駅名や地名を入力して「周辺法人を検索」してください。
+        </div>
+      </div>
+    </div>
+
+    <div id="map"></div>
+
+    <div class="right-panel">
+      <div class="list-header">
+        <div style="font-weight: 600; font-size: 0.85rem;">
+          📋 営業リスト (<span id="savedCount">0</span>)
+        </div>
+        <button id="exportCsvBtn" class="secondary" style="padding: 0.25rem 0.5rem; font-size: 0.72rem;">📥 CSV</button>
+      </div>
+      <div class="customer-list" id="savedList"></div>
+    </div>
+  </div>
+
+  <script>
+    const API_BASE = 'https://api.openpoiapi.com';
+    let map, markersLayer, searchPinLayer;
+    let currentResults = [];
+    let savedList = JSON.parse(localStorage.getItem('sales_target_list') || '[]');
+    let markerMap = new Map();
+    let activeHighlightedMarker = null;
+
+    // 1. 英語業種の日本語変換
+    const CATEGORY_MAP_JA = {
+      'retail_other': '小売・物販',
+      'lodging': '宿泊・ホテル',
+      'medical': '医療・クリニック',
+      'service_other': '一般サービス業',
+      'station': '駅・交通施設',
+      'unknown': '法人・事業者'
+    };
+
+    function formatCategoryJa(rawCat) {
+      if (!rawCat) return '法人・事業者';
+      return CATEGORY_MAP_JA[rawCat] || '法人・事業者';
+    }
+
+    // 2. 除外フィルタ
+    function isExcludedTarget(item) {
+      const cat = (item.category || item.business_type || '').toLowerCase();
+      const name = item.name || '';
+      const addr = item.address || '';
+      const text = `${name} ${addr}`;
+
+      const excludedCategories = [
+        'public_facility',
+        'education',
+        'finance',
+        'grocery',
+        'convenience_store',
+        'bakery',
+        'restaurant',
+        'cafe',
+        'fast_food',
+        'bar_izakaya',
+        'tourism'
+      ];
+      if (excludedCategories.includes(cat)) {
+        return true;
+      }
+
+      const excludedKeywords = [
+        '役所', '役場', '警察', '交番', '消防', '税務署', '県庁', '都庁', '府庁', '道庁',
+        '法務局', '労働基準監督署', 'ハローワーク', '裁判所', '自衛隊',
+        '小学校', '中学校', '高等学校', '高校', '大学', '幼稚園', '保育園', '保育所', '専門学校',
+        '独立行政法人', '地方独立行政法人', '機構', '振興公社', '事業団', '振興機構', '公民館', '区民センター',
+        '銀行', '信用金庫', '信金', '信用組合', '労働金庫', '労金', '証券',
+        '生命保険', '生保', '損害保険', '損保', 'JAバンク', 'ゆうちょ',
+        'スーパー', '百貨店', 'デパート', '生協', 'コープ', 'COOP', 'イオン', 'マックスバリュ',
+        'イトーヨーカドー', '西友', 'ライフ', '平和堂', '業務スーパー', '成城石井', 'ツルヤ', '綿半', 'アピタ', 'ピアゴ',
+        'セブン-イレブン', 'セブンイレブン', 'ファミリーマート', 'ファミマ', 'ローソン', 'ミニストップ', 'デイリーヤマザキ', 'ポプラ', 'セイコーマート',
+        '洋菓子', '和菓子', '製菓', 'ベーカリー', 'パン屋', 'ケーキ', 'スイーツ', 'パティスリー',
+        '菓子', 'シャトレーゼ', '不二家', '山崎製パン',
+        '食品', '水産', '精肉', '青果', '酒造', '醸造', 'ミート', 'フード', '製麺',
+        '居酒屋', '酒場', 'バル', '食堂', '定食', 'レストラン', 'カフェ', '喫茶', '珈琲',
+        'ラーメン', 'らーめん', '拉麺', 'うどん', 'そば', '蕎麦', '寿司', '鮨', '焼肉', '焼き肉',
+        'ステーキ', '焼鳥', '焼き鳥', '割烹', '小料理', '懐石', '中華', 'イタリアン', 'フレンチ',
+        'ダイニング', '酒房', '御食事処', 'お食事処', 'キッチン', '酒菜',
+        '岳', '山', '峰', '峠', '渓谷', '滝', '湖', '池', '岬', '高原', '展望台', '城跡', '城址',
+        '神社', '寺', '大社', '宮', '寺院', '霊園', '墓地',
+        '公園', 'キャンプ場', 'オートキャンプ', 'スキー場', 'ゴルフ場', 'ゴルフ倶楽部', 'カントリークラブ',
+        '温泉', '露天風呂', '銭湯', 'サウナ', 'スパ', '遊園地', 'テーマパーク', '水族館', '動物園', '植物園',
+        '博物館', '美術館', '資料館', '記念館', '観光案内所', '道の駅'
+      ];
+
+      return excludedKeywords.some(kw => text.includes(kw));
+    }
+
+    window.addEventListener('DOMContentLoaded', () => {
+      initMap();
+      renderSavedList();
+      setupEvents();
+      setupTour();
+    });
+
+    function initMap() {
+      map = L.map('map').setView([35.5148, 137.8217], 15);
+      L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+        attribution: '&copy; OpenStreetMap contributors'
+      }).addTo(map);
+
+      markersLayer = L.layerGroup().addTo(map);
+      searchPinLayer = L.layerGroup().addTo(map);
+    }
+
+    function makeGoogleSearchUrl(name, address) {
+      return `https://www.google.com/search?q=${encodeURIComponent((name + ' ' + (address || '') + ' 電話番号').trim())}`;
+    }
+
+    function makeGoogleMapsUrl(name, address) {
+      return `https://www.google.com/maps/search/?api=1&query=${encodeURIComponent((name + ' ' + (address || '')).trim())}`;
+    }
+
+    function setupEvents() {
+      document.getElementById('searchBtn').addEventListener('click', handleKeywordSearch);
+      document.getElementById('nearbyBtn').addEventListener('click', searchNearby);
+
+      const input = document.getElementById('searchInput');
+      let debounceTimer;
+      input.addEventListener('input', (e) => {
+        clearTimeout(debounceTimer);
+        const q = e.target.value.trim();
+        if (!q) {
+          hideAutocomplete();
+          return;
+        }
+        debounceTimer = setTimeout(() => fetchSuggest(q), 220);
+      });
+
+      input.addEventListener('keydown', (e) => {
+        if (e.key === 'Enter') handleKeywordSearch();
+      });
+
+      document.addEventListener('click', (e) => {
+        if (!e.target.closest('.input-group')) hideAutocomplete();
+      });
+
+      document.getElementById('exportCsvBtn').addEventListener('click', exportToCsv);
+    }
+
+    // --- プロダクトツアー機能 (Driver.js) ---
+    function setupTour() {
+      const driver = window.driver.js.driver;
+      
+      const tourDriver = driver({
+        showProgress: true,
+        animate: true,
+        allowClose: true,
+        overlayColor: 'rgba(15, 23, 42, 0.7)',
+        nextBtnText: '次へ',
+        prevBtnText: '前へ',
+        doneBtnText: 'ツアー完了',
+        steps: [
+          {
+            element: '#tour-step-search',
+            popover: {
+              title: '1. 周辺法人の検索',
+              description: '訪問先の駅名・地名・施設名を入力して「周辺法人を検索」すると、その地点から半径1.5km圏内の営業対象法人を中心から近い順で自動抽出します。',
+              side: 'right',
+              align: 'start'
+            }
+          },
+          {
+            element: '#nearbyBtn',
+            popover: {
+              title: '2. 現在地から即座に探索',
+              description: '外回り中のアポイントの合間やスキマ時間に「現在地周辺」を押すと、今いる場所から至近距離の法人をワンタップでリストアップできます。',
+              side: 'bottom',
+              align: 'start'
+            }
+          },
+          {
+            element: '#map',
+            popover: {
+              title: '3. 地図・ピンのリアルタイム連動',
+              description: '抽出された法人が地図上にプロットされます。リスト上の企業をクリックすると、該当ピンがオレンジ色にハイライトされ、どこにあるか直感的に把握できます。',
+              side: 'left',
+              align: 'center'
+            }
+          },
+          {
+            element: '.right-panel',
+            popover: {
+              title: '4. 営業リストの作成・管理',
+              description: '「＋追加」した見込み顧客をストックできます。Google検索から確認した電話番号や担当者メモを直接記録し、進捗ステータスを管理できます。',
+              side: 'left',
+              align: 'start'
+            }
+          },
+          {
+            element: '#exportCsvBtn',
+            popover: {
+              title: '5. CSVエクスポート',
+              description: '作成した営業リストをCSV形式でワンクリック出力。Excelでの管理や社内SFA・CRMへの引き継ぎ、テレアポリストとしてそのまま活用可能です。',
+              side: 'bottom',
+              align: 'end'
+            }
+          }
+        ]
+      });
+
+      document.getElementById('startTourBtn').addEventListener('click', () => {
+        tourDriver.drive();
+      });
+    }
+
+    async function fetchSuggest(q) {
+      try {
+        const center = map.getCenter();
+        const url = `${API_BASE}/v1/suggest?q=${encodeURIComponent(q)}&center=${center.lng.toFixed(6)},${center.lat.toFixed(6)}&limit=5`;
+        const res = await fetch(url);
+        if (!res.ok) return;
+        const data = await res.json();
+        
+        const autoList = document.getElementById('autocompleteList');
+        autoList.innerHTML = '';
+        
+        if (data.suggestions && data.suggestions.length > 0) {
+          data.suggestions.forEach(item => {
+            const div = document.createElement('div');
+            div.className = 'autocomplete-item';
+            div.innerHTML = `<strong>${item.name}</strong> <span style="color:#64748b; font-size:0.72rem;">(${item.city || item.prefecture || ''})</span>`;
+            div.addEventListener('click', () => {
+              document.getElementById('searchInput').value = item.name;
+              hideAutocomplete();
+              searchSurrounding(item.lat, item.lng, item.name);
+            });
+            autoList.appendChild(div);
+          });
+          autoList.style.display = 'block';
+        } else {
+          hideAutocomplete();
+        }
+      } catch (err) {
+        console.error(err);
+      }
+    }
+
+    function hideAutocomplete() {
+      document.getElementById('autocompleteList').style.display = 'none';
+    }
+
+    async function handleKeywordSearch() {
+      const q = document.getElementById('searchInput').value.trim();
+      if (!q) return;
+      hideAutocomplete();
+      document.getElementById('resultCount').textContent = '基準地点を特定中...';
+
+      try {
+        const centerRes = await fetch(`${API_BASE}/v1/suggest?q=${encodeURIComponent(q)}&limit=1`);
+        const centerData = await centerRes.json();
+        
+        let targetLat, targetLng, targetName = q;
+        if (centerData.suggestions && centerData.suggestions.length > 0) {
+          const top = centerData.suggestions[0];
+          targetLat = top.lat;
+          targetLng = top.lng;
+          targetName = top.name;
+        } else {
+          const directRes = await fetch(`${API_BASE}/v1/search?q=${encodeURIComponent(q)}&limit=1`);
+          const directData = await directRes.json();
+          if (directData.results && directData.results.length > 0 && directData.results[0].lat) {
+            targetLat = parseFloat(directData.results[0].lat);
+            targetLng = parseFloat(directData.results[0].lng);
+            targetName = directData.results[0].name;
+          }
+        }
+
+        if (targetLat && targetLng) {
+          searchSurrounding(targetLat, targetLng, targetName);
+        } else {
+          executeSearch({ q: q });
+        }
+      } catch (err) {
+        executeSearch({ q: q });
+      }
+    }
+
+    async function searchSurrounding(lat, lng, centerLabel) {
+      map.setView([lat, lng], 15);
+      
+      searchPinLayer.clearLayers();
+      const pin = L.circleMarker([lat, lng], {
+        radius: 7,
+        color: '#dc2626',
+        fillColor: '#ef4444',
+        fillOpacity: 0.9
+      }).addTo(searchPinLayer);
+      pin.bindPopup(`<strong>基準地点:</strong> ${centerLabel}`).openPopup();
+
+      executeSearch({
+        center: `${lng.toFixed(6)},${lat.toFixed(6)}`,
+        radius: 1500
+      }, centerLabel);
+    }
+
+    function searchNearby() {
+      if (!navigator.geolocation) {
+        alert('位置情報が取得できません');
+        return;
+      }
+      navigator.geolocation.getCurrentPosition(
+        (pos) => {
+          const lat = pos.coords.latitude;
+          const lng = pos.coords.longitude;
+          searchPinLayer.clearLayers();
+          map.setView([lat, lng], 16);
+          executeSearch({ center: `${lng.toFixed(6)},${lat.toFixed(6)}`, radius: 800 }, '現在地');
+        },
+        () => alert('現在地の取得に失敗しました')
+      );
+    }
+
+    async function executeSearch(params, centerLabel = '') {
+      document.getElementById('resultCount').textContent = '法人を検索中...';
+      try {
+        const query = new URLSearchParams({ limit: 100 });
+        if (params.q) query.set('q', params.q);
+        if (params.center) {
+          query.set('center', params.center);
+          query.set('radius', params.radius || 1500);
+        }
+
+        const res = await fetch(`${API_BASE}/v1/search?${query.toString()}`);
+        if (!res.ok) throw new Error();
+        const data = await res.json();
+
+        const rawResults = data.results || [];
+        currentResults = rawResults.filter(item => !isExcludedTarget(item));
+
+        const labelText = centerLabel ? ` (${centerLabel} 周辺)` : '';
+        document.getElementById('resultCount').textContent = `対象法人: ${currentResults.length} 件${labelText}`;
+
+        renderSearchResults(currentResults);
+        plotMarkers(currentResults);
+      } catch (err) {
+        document.getElementById('resultCount').textContent = '検索エラーが発生しました';
+      }
+    }
+
+    function plotMarkers(results) {
+      markersLayer.clearLayers();
+      markerMap.clear();
+      activeHighlightedMarker = null;
+      const bounds = [];
+
+      results.forEach((item, idx) => {
+        if (!item.lat || !item.lng) return;
+        const lat = parseFloat(item.lat);
+        const lng = parseFloat(item.lng);
+        if (isNaN(lat) || isNaN(lng)) return;
+
+        bounds.push([lat, lng]);
+        const fullAddr = item.address || ((item.prefecture || '') + (item.city || ''));
+        const catJa = formatCategoryJa(item.category || item.business_type);
+        const key = `${item.name}_${fullAddr}`;
+
+        const marker = L.circleMarker([lat, lng], {
+          radius: 8,
+          color: '#1d4ed8',
+          fillColor: '#3b82f6',
+          fillOpacity: 0.85,
+          weight: 2
+        }).addTo(markersLayer);
+
+        marker.bindPopup(`
+          <div style="font-size: 0.8rem; line-height: 1.35;">
+            <strong>${item.name}</strong><br>
+            <span style="color:#2563eb; font-size:0.7rem;">[${catJa}]</span><br>
+            <span style="color:#64748b; font-size:0.7rem;">${fullAddr}</span><br>
+            <div style="margin: 4px 0;">
+              <a href="${makeGoogleSearchUrl(item.name, fullAddr)}" target="_blank" style="font-size:0.72rem; color:#0284c7;">🔍 電話</a> |
+              <a href="${makeGoogleMapsUrl(item.name, fullAddr)}" target="_blank" style="font-size:0.72rem; color:#16a34a;">🗺 地図</a>
+            </div>
+            <button onclick="toggleSaveCustomer(${idx})" style="padding:0.2rem 0.4rem; font-size:0.7rem; width:100%;">リストへ保存</button>
+          </div>
+        `);
+
+        marker.on('click', () => {
+          selectEntity(key, lat, lng, false);
+        });
+
+        markerMap.set(key, marker);
+      });
+
+      if (bounds.length > 0) {
+        map.fitBounds(bounds, { padding: [25, 25], maxZoom: 16 });
+      }
+    }
+
+    function selectEntity(key, lat, lng, shouldPan = true) {
+      if (activeHighlightedMarker) {
+        activeHighlightedMarker.setStyle({
+          radius: 8,
+          color: '#1d4ed8',
+          fillColor: '#3b82f6',
+          fillOpacity: 0.85,
+          weight: 2
+        });
+      }
+
+      document.querySelectorAll('.card, .saved-card').forEach(el => el.classList.remove('selected'));
+      const activeCard = document.querySelector(`[data-key="${CSS.escape(key)}"]`);
+      if (activeCard) {
+        activeCard.classList.add('selected');
+        activeCard.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+      }
+
+      const marker = markerMap.get(key);
+      if (marker) {
+        marker.setStyle({
+          radius: 13,
+          color: '#c2410c',
+          fillColor: '#f97316',
+          fillOpacity: 1,
+          weight: 3
+        });
+        marker.bringToFront();
+        marker.openPopup();
+        activeHighlightedMarker = marker;
+
+        if (shouldPan && lat && lng) {
+          map.panTo([lat, lng], { animate: true, duration: 0.5 });
+        }
+      }
+    }
+
+    function renderSearchResults(results) {
+      const container = document.getElementById('resultList');
+      container.innerHTML = '';
+
+      if (results.length === 0) {
+        container.innerHTML = `<div style="text-align:center; padding: 1.5rem; color: #94a3b8; font-size:0.8rem;">営業対象となる法人が見つかりませんでした。</div>`;
+        return;
+      }
+
+      results.forEach((item, idx) => {
+        const fullAddr = item.address || ((item.prefecture || '') + (item.city || ''));
+        const isSaved = savedList.some(s => s.name === item.name && s.address === fullAddr);
+        const searchUrl = makeGoogleSearchUrl(item.name, fullAddr);
+        const mapUrl = makeGoogleMapsUrl(item.name, fullAddr);
+        const catJa = formatCategoryJa(item.category || item.business_type);
+        const key = `${item.name}_${fullAddr}`;
+
+        const card = document.createElement('div');
+        card.className = 'card';
+        card.setAttribute('data-key', key);
+        card.innerHTML = `
+          <div class="card-top">
+            <span class="card-title" title="${item.name}">${item.name}</span>
+            <span class="card-category">${catJa}</span>
+          </div>
+          <div class="card-address" title="${fullAddr}">📍 ${fullAddr}</div>
+          <div class="card-bottom">
+            <div class="quick-links" onclick="event.stopPropagation()">
+              <a class="link-chip" href="${searchUrl}" target="_blank" rel="noopener">🔍 電話/HP</a>
+              <a class="link-chip" href="${mapUrl}" target="_blank" rel="noopener">🗺 地図</a>
+            </div>
+            <button class="btn-action ${isSaved ? 'secondary' : ''}" onclick="event.stopPropagation(); toggleSaveCustomer(${idx})">
+              ${isSaved ? '✓ 済' : '＋追加'}
+            </button>
+          </div>
+        `;
+
+        card.addEventListener('click', () => {
+          selectEntity(key, parseFloat(item.lat), parseFloat(item.lng), true);
+        });
+
+        container.appendChild(card);
+      });
+    }
+
+    window.toggleSaveCustomer = function(index) {
+      const item = currentResults[index];
+      if (!item) return;
+
+      const fullAddr = item.address || ((item.prefecture || '') + (item.city || ''));
+      const existingIdx = savedList.findIndex(s => s.name === item.name && s.address === fullAddr);
+      
+      if (existingIdx >= 0) {
+        savedList.splice(existingIdx, 1);
+      } else {
+        savedList.push({
+          name: item.name,
+          address: fullAddr,
+          category: formatCategoryJa(item.category || item.business_type),
+          lat: item.lat || '',
+          lng: item.lng || '',
+          phone: '',
+          memo: '',
+          status: '未接触',
+          licenses: item.licenses || [],
+          attributions: item.attributions || [],
+          savedAt: new Date().toISOString()
+        });
+      }
+      localStorage.setItem('sales_target_list', JSON.stringify(savedList));
+      renderSavedList();
+      renderSearchResults(currentResults);
+    };
+
+    function renderSavedList() {
+      const container = document.getElementById('savedList');
+      const countEl = document.getElementById('savedCount');
+      countEl.textContent = savedList.length;
+      container.innerHTML = '';
+
+      if (savedList.length === 0) {
+        container.innerHTML = `<div style="text-align: center; color: var(--text-muted); margin-top: 2rem; font-size: 0.75rem;">リストは空です。</div>`;
+        return;
+      }
+
+      savedList.forEach((item, idx) => {
+        const key = `${item.name}_${item.address}`;
+        const card = document.createElement('div');
+        card.className = 'saved-card';
+        card.setAttribute('data-key', key);
+        card.innerHTML = `
+          <div style="font-weight:600; font-size:0.82rem; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;">${item.name}</div>
+          <div style="font-size:0.72rem; color:#64748b; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;">${item.address}</div>
+          
+          <div class="editable-row" onclick="event.stopPropagation()">
+            <input type="text" class="editable-input" placeholder="電話番号" value="${item.phone || ''}" onchange="updateCustomerField(${idx}, 'phone', this.value)">
+            <input type="text" class="editable-input" placeholder="メモ" value="${item.memo || ''}" onchange="updateCustomerField(${idx}, 'memo', this.value)">
+          </div>
+
+          <div style="display:flex; justify-content:space-between; align-items:center; margin-top:0.2rem;" onclick="event.stopPropagation()">
+            <select class="status-select" onchange="updateCustomerField(${idx}, 'status', this.value)">
+              <option value="未接触" ${item.status === '未接触' ? 'selected' : ''}>未接触</option>
+              <option value="アプローチ中" ${item.status === 'アプローチ中' ? 'selected' : ''}>アプローチ中</option>
+              <option value="アポ獲得" ${item.status === 'アポ獲得' ? 'selected' : ''}>アポ獲得</option>
+              <option value="成約" ${item.status === '成約' ? 'selected' : ''}>成約</option>
+              <option value="対象外" ${item.status === '対象外' ? 'selected' : ''}>対象外</option>
+            </select>
+            <button class="secondary" style="padding:0.2rem 0.45rem; font-size:0.68rem;" onclick="removeSaved(${idx})">✕</button>
+          </div>
+        `;
+
+        card.addEventListener('click', () => {
+          selectEntity(key, parseFloat(item.lat), parseFloat(item.lng), true);
+        });
+
+        container.appendChild(card);
+      });
+    }
+
+    window.updateCustomerField = function(idx, field, value) {
+      if (savedList[idx]) {
+        savedList[idx][field] = value;
+        localStorage.setItem('sales_target_list', JSON.stringify(savedList));
+      }
+    };
+
+    window.removeSaved = function(idx) {
+      savedList.splice(idx, 1);
+      localStorage.setItem('sales_target_list', JSON.stringify(savedList));
+      renderSavedList();
+      renderSearchResults(currentResults);
+    };
+
+    // CSVエクスポート
+    function exportToCsv() {
+      if (savedList.length === 0) {
+        alert('営業先が登録されていません。');
+        return;
+      }
+      const headers = ['施設名', '電話番号', '営業ステータス', 'メモ', '住所', '業種/カテゴリ', '登録日時'];
+      const rows = savedList.map(item => [
+        `"${(item.name || '').replace(/"/g, '""')}"`,
+        `"${(item.phone || '').replace(/"/g, '""')}"`,
+        `"${item.status || ''}"`,
+        `"${(item.memo || '').replace(/"/g, '""')}"`,
+        `"${(item.address || '').replace(/"/g, '""')}"`,
+        `"${(item.category || '').replace(/"/g, '""')}"`,
+        `"${item.savedAt || ''}"`
+      ]);
+
+      const csvContent = '\uFEFF' + [headers.join(','), ...rows.map(r => r.join(','))].join('\r\n');
+      const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = `sales_lead_list_${new Date().toISOString().slice(0,10)}.csv`;
+      a.click();
+      URL.revokeObjectURL(url);
+    }
+  </script>
+</body>
+</html>
