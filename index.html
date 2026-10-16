@@ -807,6 +807,7 @@
           phone: '',
           memo: '',
           status: '未接触',
+          postalCode: item.postal_code || '',
           licenses: item.licenses || [],
           attributions: item.attributions || [],
           savedAt: new Date().toISOString()
@@ -876,31 +877,116 @@
       renderSearchResults(currentResults);
     };
 
+    // 住所・位置情報から郵便番号を取得
+    const postalCache = new Map();
+    async function fetchPostalCode(address, lat, lng) {
+      if (!address) return '';
+      if (postalCache.has(address)) return postalCache.get(address);
+
+      // 住所文字列内に既に〒xxx-xxxxが含まれている場合の抽出
+      const rawMatch = address.match(/〒?(\d{3}-?\d{4})/);
+      if (rawMatch) {
+        const clean = rawMatch[1].replace('-', '');
+        const formatted = `${clean.slice(0, 3)}-${clean.slice(3)}`;
+        postalCache.set(address, formatted);
+        return formatted;
+      }
+
+      // 1. 緯度経度がある場合、位置情報から郵便番号を逆引き
+      if (lat && lng) {
+        try {
+          const res = await fetch(`https://geoapi.heartrails.com/api/json?method=searchByGeoLocation&x=${lng}&y=${lat}`);
+          if (res.ok) {
+            const data = await res.json();
+            const location = data.response?.location?.[0];
+            if (location && location.postal) {
+              const p = location.postal.replace('-', '');
+              const formatted = `${p.slice(0, 3)}-${p.slice(3)}`;
+              postalCache.set(address, formatted);
+              return formatted;
+            }
+          }
+        } catch (_) {}
+      }
+
+      // 2. 住所文字列から市区町村・町名を抽出して郵便番号APIを検索
+      try {
+        const cleanAddr = address.replace(/[0-9０-９\-−ー丁目番地号\s].*$/, '').trim();
+        const cityMatch = cleanAddr.match(/^(.+?[都道府県])?(.+?[市区町村])(.*)$/);
+        const city = cityMatch ? cityMatch[2] : '';
+        const town = cityMatch ? cityMatch[3] : '';
+
+        if (city) {
+          const res = await fetch(`https://geoapi.heartrails.com/api/json?method=getTowns&city=${encodeURIComponent(city)}`);
+          if (res.ok) {
+            const data = await res.json();
+            const towns = data.response?.town || [];
+            if (towns.length > 0) {
+              const matchedTown = towns.find(t => town && (t.town.includes(town) || town.includes(t.town))) || towns[0];
+              if (matchedTown && matchedTown.postal) {
+                const p = matchedTown.postal.replace('-', '');
+                const formatted = `${p.slice(0, 3)}-${p.slice(3)}`;
+                postalCache.set(address, formatted);
+                return formatted;
+              }
+            }
+          }
+        }
+      } catch (_) {}
+
+      postalCache.set(address, '');
+      return '';
+    }
+
     // CSVエクスポート
-    function exportToCsv() {
+    async function exportToCsv() {
       if (savedList.length === 0) {
         alert('営業先が登録されていません。');
         return;
       }
-      const headers = ['施設名', '電話番号', '営業ステータス', 'メモ', '住所', '業種/カテゴリ', '登録日時'];
-      const rows = savedList.map(item => [
-        `"${(item.name || '').replace(/"/g, '""')}"`,
-        `"${(item.phone || '').replace(/"/g, '""')}"`,
-        `"${item.status || ''}"`,
-        `"${(item.memo || '').replace(/"/g, '""')}"`,
-        `"${(item.address || '').replace(/"/g, '""')}"`,
-        `"${(item.category || '').replace(/"/g, '""')}"`,
-        `"${item.savedAt || ''}"`
-      ]);
 
-      const csvContent = '\uFEFF' + [headers.join(','), ...rows.map(r => r.join(','))].join('\r\n');
-      const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
-      const url = URL.createObjectURL(blob);
-      const a = document.createElement('a');
-      a.href = url;
-      a.download = `sales_lead_list_${new Date().toISOString().slice(0,10)}.csv`;
-      a.click();
-      URL.revokeObjectURL(url);
+      const exportBtn = document.getElementById('exportCsvBtn');
+      const originalText = exportBtn.textContent;
+      exportBtn.disabled = true;
+      exportBtn.textContent = '⏳ 郵便番号取得中...';
+
+      try {
+        // 全営業先の郵便番号を非同期で一括補完
+        const updatedRows = await Promise.all(savedList.map(async (item) => {
+          let postal = item.postalCode || '';
+          if (!postal) {
+            postal = await fetchPostalCode(item.address, item.lat, item.lng);
+            item.postalCode = postal;
+          }
+          return [
+            `"${(item.name || '').replace(/"/g, '""')}"`,
+            `"${postal}"`,
+            `"${(item.phone || '').replace(/"/g, '""')}"`,
+            `"${item.status || ''}"`,
+            `"${(item.memo || '').replace(/"/g, '""')}"`,
+            `"${(item.address || '').replace(/"/g, '""')}"`,
+            `"${(item.category || '').replace(/"/g, '""')}"`,
+            `"${item.savedAt || ''}"`
+          ];
+        }));
+
+        localStorage.setItem('sales_target_list', JSON.stringify(savedList));
+
+        const headers = ['施設名', '郵便番号', '電話番号', '営業ステータス', 'メモ', '住所', '業種/カテゴリ', '登録日時'];
+        const csvContent = '\uFEFF' + [headers.join(','), ...updatedRows.map(r => r.join(','))].join('\r\n');
+        const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement('a');
+        a.href = url;
+        a.download = `sales_lead_list_${new Date().toISOString().slice(0, 10)}.csv`;
+        a.click();
+        URL.revokeObjectURL(url);
+      } catch (err) {
+        alert('CSV生成中にエラーが発生しました。');
+      } finally {
+        exportBtn.disabled = false;
+        exportBtn.textContent = originalText;
+      }
     }
   </script>
 </body>
